@@ -58,6 +58,15 @@ BG_CURSOR=$'\033[48;2;0;122;204m'
 HIDE_CURSOR=$'\033[?25l'
 SHOW_CURSOR=$'\033[?25h'
 
+# Fast cursor positioning (no fork, unlike tput cup)
+cup() { printf '\033[%d;%dH' $(($1+1)) $(($2+1)); }
+
+# Pre-generate reusable dash string
+printf -v _DASHES '%300s' ''
+_DASHES="${_DASHES// /─}"
+printf -v _HEAVY_DASHES '%300s' ''
+_HEAVY_DASHES="${_HEAVY_DASHES// /━}"
+
 # ── Option definitions ──────────────────────────────────────────────────────
 FLAT_OPTS=(
     "---|Session|"
@@ -172,20 +181,11 @@ for ((i = 0; i < NUM_OPTS; i++)); do
 done
 
 # ── Grid helpers ────────────────────────────────────────────────────────────
-group_rows() {
-    local g=$1
-    echo $(( (GROUP_COUNT[$g] + 1) / 2 ))
-}
+group_rows() { _RET=$(( (GROUP_COUNT[$1] + 1) / 2 )); }
 
 grid_to_flat() {
-    local g=$1 r=$2 c=$3
-    local idx=$(( GROUP_START[$g] + r * 2 + c ))
-    local max=$(( GROUP_START[$g] + GROUP_COUNT[$g] ))
-    if ((idx < max)); then
-        echo "$idx"
-    else
-        echo "-1"
-    fi
+    local idx=$(( GROUP_START[$1] + $2 * 2 + $3 ))
+    if ((idx < GROUP_START[$1] + GROUP_COUNT[$1])); then _RET=$idx; else _RET=-1; fi
 }
 
 # ── Cursor state ────────────────────────────────────────────────────────────
@@ -218,6 +218,7 @@ calc_dimensions() {
     HALF_W=$(( (BOX_W - 4) / 2 ))
     CONTENT_H=$((TERM_LINES - HEADER_H - FOOTER_H))
     ((CONTENT_H < 5)) && CONTENT_H=5
+    HLINE="${_DASHES:0:$((BOX_W - 2))}"
 }
 calc_dimensions
 
@@ -232,8 +233,8 @@ build_row_map() {
     ROW_MAP=()
     for ((g = 0; g < NUM_GROUPS; g++)); do
         ROW_MAP+=("header:$g")
-        local rows
-        rows=$(group_rows "$g")
+        group_rows "$g"
+        local rows=$_RET
         for ((r = 0; r < rows; r++)); do
             ROW_MAP+=("option:$g:$r")
         done
@@ -247,16 +248,15 @@ cursor_to_screen_row() {
     local target="option:${CUR_GROUP}:${CUR_ROW}"
     for ((i = 0; i < TOTAL_ROWS; i++)); do
         if [[ "${ROW_MAP[$i]}" == "$target" ]]; then
-            echo "$i"
-            return
+            _RET=$i; return
         fi
     done
-    echo "0"
+    _RET=0
 }
 
 ensure_visible() {
-    local srow
-    srow=$(cursor_to_screen_row)
+    cursor_to_screen_row
+    local srow=$_RET
     if ((srow < SCROLL)); then
         SCROLL=$srow
         ((SCROLL > 0)) && ((SCROLL--))
@@ -268,83 +268,65 @@ ensure_visible() {
 
 # ── Sticky header helper ───────────────────────────────────────────────────
 find_sticky_group() {
-    if ((SCROLL == 0)); then
-        echo "-1"
-        return
-    fi
+    if ((SCROLL == 0)); then _RET=-1; return; fi
     local entry="${ROW_MAP[$SCROLL]}"
     local type="${entry%%:*}"
-    if [[ "$type" == "header" ]]; then
-        echo "-1"
-        return
-    fi
+    if [[ "$type" == "header" ]]; then _RET=-1; return; fi
     local rest="${entry#*:}"
     local g="${rest%%:*}"
     for ((i = 0; i < TOTAL_ROWS; i++)); do
         if [[ "${ROW_MAP[$i]}" == "header:$g" ]]; then
-            if ((i < SCROLL)); then
-                echo "$g"
-                return
-            fi
+            if ((i < SCROLL)); then _RET=$g; return; fi
             break
         fi
     done
-    echo "-1"
+    _RET=-1
 }
 
 # ── Drawing ─────────────────────────────────────────────────────────────────
-draw_hline() {
-    printf '%*s' "$((BOX_W - 2))" '' | tr ' ' '─'
-}
-
 draw_empty_row() {
-    local row=$1
-    tput cup "$row" "$COL"
+    cup "$1" "$COL"
     printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
 }
 
 draw_group_header_at() {
     local screen_row=$1 g=$2
     local name="${GROUP_NAME[$g]}"
-    local name_upper
-    name_upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
-    local label_plain="─ ${name_upper} "
-    local label_len=${#label_plain}
+    local name_upper="${name^^}"
+    local label_len=$((${#name_upper} + 3))
     local remain=$((BOX_W - 2 - label_len))
-    tput cup "$screen_row" "$COL"
-    printf "${BLUE}├─${RESET} ${BOLD}${BRIGHT_CYAN}%s${RESET} ${BLUE}" "$name_upper"
-    printf '%*s' "$remain" '' | tr ' ' '─'
-    printf "┤${RESET}"
+    cup "$screen_row" "$COL"
+    printf "${BLUE}├─${RESET} ${BOLD}${BRIGHT_CYAN}%s${RESET} ${BLUE}%s┤${RESET}" "$name_upper" "${_DASHES:0:$remain}"
 }
 
 draw_header() {
-    tput cup 0 "$COL"
-    printf "${BLUE}╭$(draw_hline)╮${RESET}"
+    cup 0 "$COL"
+    printf "${BLUE}╭%s╮${RESET}" "$HLINE"
 
-    tput cup 1 "$COL"
+    cup 1 "$COL"
     printf "${BLUE}│${RESET}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}    ${BOLD}${BRIGHT_BLUE}Claude Code Launcher${RESET} ${DIM}v${LAUNCHER_VERSION}${RESET}"
-    tput cup 1 $((COL + BOX_W - 1))
+    cup 1 $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
-    tput cup 2 "$COL"
+    cup 2 "$COL"
     printf "${BLUE}│${RESET}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}   ${WHITE}Found claude code version:${RESET} ${BRIGHT_GREEN}v${CLAUDE_VERSION}${RESET}"
-    tput cup 2 $((COL + BOX_W - 1))
+    cup 2 $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
-    tput cup 3 "$COL"
+    cup 3 "$COL"
     printf "${BLUE}│${RESET}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}"
-    tput cup 3 $((COL + BOX_W - 1))
+    cup 3 $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
     draw_empty_row 4
 
-    tput cup 5 "$COL"
+    cup 5 "$COL"
     printf "${BLUE}│${RESET}  ${BRIGHT_CYAN}SPACE${RESET} ${DIM}toggle${RESET}  ${BRIGHT_CYAN}↑↓←→${RESET} ${DIM}navigate${RESET}  ${BRIGHT_CYAN}ENTER${RESET} ${DIM}launch${RESET}  ${BRIGHT_CYAN}ESC${RESET} ${DIM}or${RESET} ${BRIGHT_CYAN}Q${RESET} ${DIM}to quit${RESET}"
-    tput cup 5 $((COL + BOX_W - 1))
+    cup 5 $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
-    tput cup 6 "$COL"
-    printf "${BLUE}├$(draw_hline)┤${RESET}"
+    cup 6 "$COL"
+    printf "${BLUE}├%s┤${RESET}" "$HLINE"
 }
 
 draw_option_cell() {
@@ -383,9 +365,8 @@ draw_option_cell() {
 
 draw_option_row() {
     local screen_row=$1 g=$2 r=$3
-    local left_idx right_idx
-    left_idx=$(grid_to_flat "$g" "$r" 0)
-    right_idx=$(grid_to_flat "$g" "$r" 1)
+    grid_to_flat "$g" "$r" 0; local left_idx=$_RET
+    grid_to_flat "$g" "$r" 1; local right_idx=$_RET
 
     local left_cur=0 right_cur=0
     if ((g == CUR_GROUP && r == CUR_ROW && CUR_COL == 0)); then
@@ -395,23 +376,23 @@ draw_option_row() {
         right_cur=1
     fi
 
-    tput cup "$screen_row" "$COL"
+    cup "$screen_row" "$COL"
     printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
-    tput cup "$screen_row" "$COL"
+    cup "$screen_row" "$COL"
     printf "${BLUE}│${RESET}"
 
     draw_option_cell "$left_idx" "$left_cur"
 
-    tput cup "$screen_row" $((COL + 2 + HALF_W))
+    cup "$screen_row" $((COL + 2 + HALF_W))
     draw_option_cell "$right_idx" "$right_cur"
 
-    tput cup "$screen_row" $((COL + BOX_W - 1))
+    cup "$screen_row" $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 }
 
 draw_content() {
-    local sticky_g
-    sticky_g=$(find_sticky_group)
+    find_sticky_group
+    local sticky_g=$_RET
     local offset=0
 
     if ((sticky_g >= 0)); then
@@ -452,14 +433,14 @@ draw_content() {
 draw_footer() {
     local row=$((HEADER_H + CONTENT_H))
 
-    tput cup "$row" "$COL"
-    printf "${BLUE}├$(draw_hline)┤${RESET}"
+    cup "$row" "$COL"
+    printf "${BLUE}├%s┤${RESET}" "$HLINE"
 
-    local flat_idx
-    flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
-    tput cup $((row + 1)) "$COL"
+    grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL"
+    local flat_idx=$_RET
+    cup $((row + 1)) "$COL"
     printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
-    tput cup $((row + 1)) "$COL"
+    cup $((row + 1)) "$COL"
     if ((flat_idx >= 0)); then
         local desc="${OPT_DESC[$flat_idx]}"
         local arg="${OPT_ARG[$flat_idx]}"
@@ -471,11 +452,11 @@ draw_footer() {
     else
         printf "${BLUE}│${RESET}"
     fi
-    tput cup $((row + 1)) $((COL + BOX_W - 1))
+    cup $((row + 1)) $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
-    tput cup $((row + 2)) "$COL"
-    printf "${BLUE}├$(draw_hline)┤${RESET}"
+    cup $((row + 2)) "$COL"
+    printf "${BLUE}├%s┤${RESET}" "$HLINE"
 
     local summary=""
     for ((i = 0; i < NUM_OPTS; i++)); do
@@ -486,19 +467,19 @@ draw_footer() {
         fi
     done
 
-    tput cup $((row + 3)) "$COL"
+    cup $((row + 3)) "$COL"
     printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
-    tput cup $((row + 3)) "$COL"
+    cup $((row + 3)) "$COL"
     if [[ -n "$summary" ]]; then
         printf "${BLUE}│${RESET}  ${BRIGHT_GREEN}❯${RESET} ${BRIGHT_WHITE}claude${RESET} ${YELLOW}%s${RESET}" "$summary"
     else
         printf "${BLUE}│${RESET}  ${DIM}❯ claude (no options selected)${RESET}"
     fi
-    tput cup $((row + 3)) $((COL + BOX_W - 1))
+    cup $((row + 3)) $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
-    tput cup $((row + 4)) "$COL"
-    printf "${BLUE}╰$(draw_hline)╯${RESET}"
+    cup $((row + 4)) "$COL"
+    printf "${BLUE}╰%s╯${RESET}" "$HLINE"
 }
 
 draw_all() {
@@ -516,9 +497,9 @@ prompt_value() {
 
     local row=$((HEADER_H + CONTENT_H + 3))
 
-    tput cup "$row" "$COL"
+    cup "$row" "$COL"
     printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
-    tput cup "$row" "$COL"
+    cup "$row" "$COL"
     printf "${BLUE}│${RESET}  ${BRIGHT_YELLOW}%s${RESET} ${BRIGHT_CYAN}➜${RESET} " "$flag"
 
     printf "%s" "$SHOW_CURSOR"
@@ -538,11 +519,8 @@ prompt_value() {
 
 # ── Navigation ──────────────────────────────────────────────────────────────
 clamp_col() {
-    local flat_idx
-    flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
-    if ((flat_idx < 0)); then
-        CUR_COL=0
-    fi
+    grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL"
+    if ((_RET < 0)); then CUR_COL=0; fi
 }
 
 move_up() {
@@ -551,13 +529,13 @@ move_up() {
         clamp_col
     elif ((CUR_GROUP > 0)); then
         ((CUR_GROUP--))
-        CUR_ROW=$(( $(group_rows "$CUR_GROUP") - 1 ))
+        group_rows "$CUR_GROUP"; CUR_ROW=$((_RET - 1))
         clamp_col
     fi
 }
 
 move_down() {
-    local max_row=$(( $(group_rows "$CUR_GROUP") - 1 ))
+    group_rows "$CUR_GROUP"; local max_row=$((_RET - 1))
     if ((CUR_ROW < max_row)); then
         ((CUR_ROW++))
         clamp_col
@@ -576,11 +554,37 @@ move_left() {
 
 move_right() {
     if ((CUR_COL == 0)); then
-        local flat_idx
-        flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" 1)
-        if ((flat_idx >= 0)); then
-            CUR_COL=1
+        grid_to_flat "$CUR_GROUP" "$CUR_ROW" 1
+        if ((_RET >= 0)); then CUR_COL=1; fi
+    fi
+}
+
+# ── Partial redraw helper ───────────────────────────────────────────────────
+_partial_redraw() {
+    find_sticky_group
+    local soff=0
+    ((_RET >= 0)) && soff=1
+    local target="option:${_OLD_G}:${_OLD_R}"
+    for ((i = 0; i < TOTAL_ROWS; i++)); do
+        if [[ "${ROW_MAP[$i]}" == "$target" ]]; then
+            local si=$((i - SCROLL + soff))
+            if ((si >= 0 && si < CONTENT_H)); then
+                draw_option_row "$((HEADER_H + si))" "$_OLD_G" "$_OLD_R"
+            fi
+            break
         fi
+    done
+    if ((_OLD_G != CUR_GROUP || _OLD_R != CUR_ROW)); then
+        target="option:${CUR_GROUP}:${CUR_ROW}"
+        for ((i = 0; i < TOTAL_ROWS; i++)); do
+            if [[ "${ROW_MAP[$i]}" == "$target" ]]; then
+                local si=$((i - SCROLL + soff))
+                if ((si >= 0 && si < CONTENT_H)); then
+                    draw_option_row "$((HEADER_H + si))" "$CUR_GROUP" "$CUR_ROW"
+                fi
+                break
+            fi
+        done
     fi
 }
 
@@ -588,6 +592,8 @@ move_right() {
 draw_all
 
 while true; do
+    _OLD_G=$CUR_GROUP _OLD_R=$CUR_ROW _OLD_C=$CUR_COL _OLD_SCROLL=$SCROLL
+
     IFS= read -rsn1 key
 
     case "$key" in
@@ -628,7 +634,8 @@ while true; do
             exit 0
             ;;
         ' ')
-            flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
+            grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL"
+            flat_idx=$_RET
             if ((flat_idx >= 0)); then
                 if [[ "${SELECTED[$flat_idx]}" == "1" ]]; then
                     SELECTED[$flat_idx]="0"
@@ -653,8 +660,11 @@ while true; do
         calc_dimensions
         build_row_map
         draw_all
-    else
+    elif ((SCROLL != _OLD_SCROLL)); then
         draw_content
+        draw_footer
+    else
+        _partial_redraw
         draw_footer
     fi
 done
@@ -693,13 +703,13 @@ draw_launch_screen() {
     fi
 
     printf "${CL}\n"
-    printf "${CL}${BLUE}╭$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '━')┯$(printf '%*s' "$((w - SEP - 1))" '' | tr ' ' '━')${RESET}\n"
+    printf "${CL}${BLUE}╭%s┯%s${RESET}\n" "${_HEAVY_DASHES:0:$((SEP - 1))}" "${_HEAVY_DASHES:0:$((w - SEP - 1))}"
     printf "${CL}${rc}%-$((SEP - 1))s${rc} %b\n" "" "$heading"
     printf "${CL}${rc}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}   ${rc} ${BRIGHT_GREEN}❯${RESET} ${BRIGHT_WHITE}claude${RESET} ${YELLOW}%s${RESET}\n" "${CMD_ARGS[*]}"
     printf "${CL}${rc}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}  ${rc}\n"
     printf "${CL}${rc}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}    ${rc}\n"
     printf "${CL}${rc}%-$((SEP - 1))s${rc} ${DIM}(ENTER to launch / ESC to cancel)${RESET}\n" ""
-    printf "${CL}${BLUE}╰$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '─')┴$(printf '%*s' "$((w - SEP - 2))" '' | tr ' ' '─')━${RESET}\n"
+    printf "${CL}${BLUE}╰%s┴%s━${RESET}\n" "${_DASHES:0:$((SEP - 1))}" "${_DASHES:0:$((w - SEP - 2))}"
 
     LAUNCH_DRAWN=1
 }
