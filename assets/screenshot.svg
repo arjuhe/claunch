@@ -65,7 +65,7 @@
   <text font-family="Menlo,Monaco,Consolas,monospace" x="28" y="150" fill="#60b6cb" font-weight="bold" font-size="12">SESSION</text>
   <line x1="92" y1="146" x2="766" y2="146" stroke="#1370d3" stroke-width="1"/>
 
-  <rect x="52" y="158" width="90" height="18" rx="2" fill="#007acc"/>
+  <rect x="52" y="158" width="100" height="18" rx="2" fill="#007acc"/>
   <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="170" fill="#888" font-size="12">[ ]</text>
   <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="170" fill="#f7f7f7" font-weight="bold">--continue</text>
   <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="170" fill="#888" font-size="12">[ ]</text>
