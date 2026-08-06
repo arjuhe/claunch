@@ -64,6 +64,8 @@ cup() { printf '\033[%d;%dH' $(($1+1)) $(($2+1)); }
 # Pre-generate reusable dash string
 printf -v _DASHES '%300s' ''
 _DASHES="${_DASHES// /─}"
+printf -v _HEAVY_DASHES '%300s' ''
+_HEAVY_DASHES="${_HEAVY_DASHES// /━}"
 
 # ── Option definitions ──────────────────────────────────────────────────────
 FLAT_OPTS=(
@@ -701,13 +703,13 @@ draw_launch_screen() {
     fi
 
     printf "${CL}\n"
-    printf "${CL}${BLUE}╭$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '━')┯$(printf '%*s' "$((w - SEP - 1))" '' | tr ' ' '━')${RESET}\n"
+    printf "${CL}${BLUE}╭%s┯%s${RESET}\n" "${_HEAVY_DASHES:0:$((SEP - 1))}" "${_HEAVY_DASHES:0:$((w - SEP - 1))}"
     printf "${CL}${rc}%-$((SEP - 1))s${rc} %b\n" "" "$heading"
     printf "${CL}${rc}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}   ${rc} ${BRIGHT_GREEN}❯${RESET} ${BRIGHT_WHITE}claude${RESET} ${YELLOW}%s${RESET}\n" "${CMD_ARGS[*]}"
     printf "${CL}${rc}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}  ${rc}\n"
     printf "${CL}${rc}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}    ${rc}\n"
     printf "${CL}${rc}%-$((SEP - 1))s${rc} ${DIM}(ENTER to launch / ESC to cancel)${RESET}\n" ""
-    printf "${CL}${BLUE}╰$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '─')┴$(printf '%*s' "$((w - SEP - 2))" '' | tr ' ' '─')━${RESET}\n"
+    printf "${CL}${BLUE}╰%s┴%s━${RESET}\n" "${_DASHES:0:$((SEP - 1))}" "${_DASHES:0:$((w - SEP - 2))}"
 
     LAUNCH_DRAWN=1
 }
