@@ -1,0 +1,742 @@
+#!/usr/bin/env bash
+# claunch — TUI launcher for Claude Code
+
+set -uo pipefail
+
+LAUNCHER_VERSION="0"
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
+    cat <<'HELP'
+claunch — TUI launcher for Claude Code
+
+Usage: claunch [--help]
+
+A terminal UI that presents all of Claude Code's CLI options as a
+visual checklist. Toggle flags, enter values, and launch claude with
+your selected configuration.
+
+Controls:
+  ↑↓←→        Navigate options
+  SPACE        Toggle option (prompts for value if needed)
+  ENTER        Launch claude with selected options
+  ESC / Q      Quit
+
+Requirements:
+  bash 4+      (macOS: brew install bash)
+  claude       Claude Code CLI in PATH
+
+https://github.com/arjuhe/claunch
+HELP
+    exit 0
+fi
+
+CLAUDE_BIN=$(command -v claude 2>/dev/null || echo "")
+if [[ -z "$CLAUDE_BIN" ]]; then
+    echo "Error: claude not found in PATH"
+    exit 1
+fi
+CLAUDE_VERSION=$("$CLAUDE_BIN" --version 2>/dev/null || echo "unknown")
+
+# ── Colors (Aardvark Blue palette) ──────────────────────────────────────────
+BLUE=$'\033[38;2;19;112;211m'
+BRIGHT_BLUE=$'\033[38;2;96;164;236m'
+CYAN=$'\033[38;2;0;142;176m'
+BRIGHT_CYAN=$'\033[38;2;96;182;203m'
+GREEN=$'\033[38;2;75;140;15m'
+BRIGHT_GREEN=$'\033[38;2;149;220;85m'
+YELLOW=$'\033[38;2;219;186;0m'
+BRIGHT_YELLOW=$'\033[38;2;255;231;99m'
+RED=$'\033[38;2;170;52;46m'
+MAGENTA=$'\033[38;2;196;58;194m'
+BRIGHT_MAGENTA=$'\033[38;2;226;107;226m'
+WHITE=$'\033[38;2;221;221;221m'
+BRIGHT_WHITE=$'\033[38;2;247;247;247m'
+DIM=$'\033[2m'
+BOLD=$'\033[1m'
+RESET=$'\033[0m'
+BG_CURSOR=$'\033[48;2;0;122;204m'
+HIDE_CURSOR=$'\033[?25l'
+SHOW_CURSOR=$'\033[?25h'
+
+# ── Option definitions ──────────────────────────────────────────────────────
+FLAT_OPTS=(
+    "---|Session|"
+    "--continue|Continue most recent conversation|"
+    "--resume|Resume by session ID or pick interactively|search term (optional)"
+    "--fork-session|Fork session on resume (new session ID)|"
+    "--name|Session display name|name"
+    "--session-id|Use specific session ID|UUID"
+    "--from-pr|Resume session linked to a PR|PR number or URL (optional)"
+
+    "---|Model|"
+    "--model|Model selection|model (opus/sonnet/fable/haiku)"
+    "--effort|Effort level|level (low/medium/high/xhigh/max)"
+    "--fallback-model|Fallback model on overload|model (comma-separated list)"
+
+    "---|Prompt & Output|"
+    "--system-prompt|Override system prompt|prompt text"
+    "--append-system-prompt|Append to default system prompt|prompt text"
+    "--print|Print response and exit (non-interactive)|"
+    "--input-format|Input format (with --print)|format (text/stream-json)"
+    "--output-format|Output format (with --print)|format (text/json/stream-json)"
+    "--json-schema|Structured output JSON schema|JSON schema"
+    "--prompt-suggestions|Enable prompt suggestions|"
+    "--verbose|Verbose output|"
+
+    "---|Permissions|"
+    "--permission-mode|Permission mode|mode (acceptEdits/auto/manual/dontAsk/plan)"
+    "--allow-dangerously-skip-permissions|Enable skip-permissions as an option|"
+    "--dangerously-skip-permissions|Bypass ALL permission checks|"
+
+    "---|Tools|"
+    "--allowed-tools|Allowed tool names|tools (e.g. \"Bash(git *) Edit\")"
+    "--disallowed-tools|Denied tool names|tools (e.g. \"Bash(git *) Edit\")"
+    "--tools|Built-in tool list|tools (e.g. \"Bash,Edit,Read\" or \"default\")"
+    "--disable-slash-commands|Disable all skills|"
+
+    "---|Environment|"
+    "--add-dir|Additional directories to allow|directories"
+    "--mcp-config|MCP server config file(s)|path to JSON"
+    "--strict-mcp-config|Only use MCP servers from --mcp-config|"
+    "--plugin-dir|Load plugin from directory or .zip|path"
+    "--plugin-url|Fetch plugin .zip from URL|URL"
+    "--settings|Additional settings JSON file or string|file path or JSON"
+    "--setting-sources|Setting sources to load|sources (user,project,local)"
+    "--agents|Custom agents JSON definition|JSON object"
+    "--agent|Agent for this session|agent name"
+
+    "---|Mode|"
+    "--background|Start as background agent|"
+    "--bare|Minimal mode (skip hooks, LSP, plugins, etc.)|"
+    "--safe-mode|Disable all customizations|"
+    "--brief|Brief agent mode (SendUserMessage tool)|"
+    "--debug|Debug mode with optional filter|filter (e.g. api,hooks)"
+    "--debug-file|Write debug logs to file|file path"
+    "--ide|Auto-connect to IDE on startup|"
+    "--chrome|Enable Chrome integration|"
+    "--no-chrome|Disable Chrome integration|"
+
+    "---|Advanced|"
+    "--worktree|Git worktree session|worktree name (optional)"
+    "--tmux|Create tmux session for worktree|"
+    "--max-budget-usd|Max API spend (with --print)|dollar amount"
+    "--ax-screen-reader|Screen-reader friendly output|"
+    "--betas|Beta headers for API requests|betas"
+    "--exclude-dynamic-system-prompt|Move per-machine sections to first user msg|"
+    "--no-session-persistence|Disable session persistence (with --print)|"
+    "--forward-subagent-text|Forward subagent text blocks (with --print)|"
+    "--include-hook-events|Include hook events in output stream|"
+    "--include-partial-messages|Include partial message chunks (with --print)|"
+    "--replay-user-messages|Re-emit user messages on stdout|"
+    "--remote-control|Start with Remote Control enabled|name (optional)"
+    "--file|File resources to download at startup|file_id:relative_path"
+)
+
+# ── Parse into groups ───────────────────────────────────────────────────────
+OPT_FLAG=()
+OPT_DESC=()
+OPT_ARG=()
+GROUP_NAME=()
+GROUP_START=()
+GROUP_COUNT=()
+
+cur_group=-1
+for entry in "${FLAT_OPTS[@]}"; do
+    IFS='|' read -r flag desc arg_hint <<< "$entry"
+    if [[ "$flag" == "---" ]]; then
+        if ((cur_group >= 0)); then
+            GROUP_COUNT[$cur_group]=$((${#OPT_FLAG[@]} - GROUP_START[$cur_group]))
+        fi
+        ((cur_group++))
+        GROUP_NAME+=("$desc")
+        GROUP_START+=("${#OPT_FLAG[@]}")
+        GROUP_COUNT+=(0)
+    else
+        OPT_FLAG+=("$flag")
+        OPT_DESC+=("$desc")
+        OPT_ARG+=("$arg_hint")
+    fi
+done
+if ((cur_group >= 0)); then
+    GROUP_COUNT[$cur_group]=$((${#OPT_FLAG[@]} - GROUP_START[$cur_group]))
+fi
+
+NUM_OPTS=${#OPT_FLAG[@]}
+NUM_GROUPS=${#GROUP_NAME[@]}
+
+SELECTED=()
+VALUES=()
+for ((i = 0; i < NUM_OPTS; i++)); do
+    SELECTED+=("0")
+    VALUES+=("")
+done
+
+# ── Grid helpers ────────────────────────────────────────────────────────────
+group_rows() {
+    local g=$1
+    echo $(( (GROUP_COUNT[$g] + 1) / 2 ))
+}
+
+grid_to_flat() {
+    local g=$1 r=$2 c=$3
+    local idx=$(( GROUP_START[$g] + r * 2 + c ))
+    local max=$(( GROUP_START[$g] + GROUP_COUNT[$g] ))
+    if ((idx < max)); then
+        echo "$idx"
+    else
+        echo "-1"
+    fi
+}
+
+# ── Cursor state ────────────────────────────────────────────────────────────
+CUR_GROUP=0
+CUR_ROW=0
+CUR_COL=0
+
+# ── Terminal setup ──────────────────────────────────────────────────────────
+cleanup() {
+    printf "%s" "$SHOW_CURSOR"
+    tput rmcup 2>/dev/null
+    stty "$ORIG_STTY" 2>/dev/null
+}
+trap cleanup EXIT
+
+ORIG_STTY=$(stty -g)
+stty -echo -icanon min 1 time 0
+tput smcup 2>/dev/null
+printf "%s" "$HIDE_CURSOR"
+
+# ── Dimensions ──────────────────────────────────────────────────────────────
+COL=0
+HEADER_H=7
+FOOTER_H=5
+
+calc_dimensions() {
+    TERM_LINES=$(tput lines)
+    TERM_COLS=$(tput cols)
+    BOX_W=$TERM_COLS
+    HALF_W=$(( (BOX_W - 4) / 2 ))
+    CONTENT_H=$((TERM_LINES - HEADER_H - FOOTER_H))
+    ((CONTENT_H < 5)) && CONTENT_H=5
+}
+calc_dimensions
+
+NEED_REDRAW=false
+handle_resize() { NEED_REDRAW=true; }
+trap handle_resize WINCH
+
+SCROLL=0
+
+# ── Compute visible rows ───────────────────────────────────────────────────
+build_row_map() {
+    ROW_MAP=()
+    for ((g = 0; g < NUM_GROUPS; g++)); do
+        ROW_MAP+=("header:$g")
+        local rows
+        rows=$(group_rows "$g")
+        for ((r = 0; r < rows; r++)); do
+            ROW_MAP+=("option:$g:$r")
+        done
+        ROW_MAP+=("blank:$g")
+    done
+    TOTAL_ROWS=${#ROW_MAP[@]}
+}
+build_row_map
+
+cursor_to_screen_row() {
+    local target="option:${CUR_GROUP}:${CUR_ROW}"
+    for ((i = 0; i < TOTAL_ROWS; i++)); do
+        if [[ "${ROW_MAP[$i]}" == "$target" ]]; then
+            echo "$i"
+            return
+        fi
+    done
+    echo "0"
+}
+
+ensure_visible() {
+    local srow
+    srow=$(cursor_to_screen_row)
+    if ((srow < SCROLL)); then
+        SCROLL=$srow
+        ((SCROLL > 0)) && ((SCROLL--))
+    fi
+    if ((srow >= SCROLL + CONTENT_H)); then
+        SCROLL=$((srow - CONTENT_H + 1))
+    fi
+}
+
+# ── Sticky header helper ───────────────────────────────────────────────────
+find_sticky_group() {
+    if ((SCROLL == 0)); then
+        echo "-1"
+        return
+    fi
+    local entry="${ROW_MAP[$SCROLL]}"
+    local type="${entry%%:*}"
+    if [[ "$type" == "header" ]]; then
+        echo "-1"
+        return
+    fi
+    local rest="${entry#*:}"
+    local g="${rest%%:*}"
+    for ((i = 0; i < TOTAL_ROWS; i++)); do
+        if [[ "${ROW_MAP[$i]}" == "header:$g" ]]; then
+            if ((i < SCROLL)); then
+                echo "$g"
+                return
+            fi
+            break
+        fi
+    done
+    echo "-1"
+}
+
+# ── Drawing ─────────────────────────────────────────────────────────────────
+draw_hline() {
+    printf '%*s' "$((BOX_W - 2))" '' | tr ' ' '─'
+}
+
+draw_empty_row() {
+    local row=$1
+    tput cup "$row" "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+}
+
+draw_group_header_at() {
+    local screen_row=$1 g=$2
+    local name="${GROUP_NAME[$g]}"
+    local name_upper
+    name_upper=$(echo "$name" | tr '[:lower:]' '[:upper:]')
+    local label_plain="─ ${name_upper} "
+    local label_len=${#label_plain}
+    local remain=$((BOX_W - 2 - label_len))
+    tput cup "$screen_row" "$COL"
+    printf "${BLUE}├─${RESET} ${BOLD}${BRIGHT_CYAN}%s${RESET} ${BLUE}" "$name_upper"
+    printf '%*s' "$remain" '' | tr ' ' '─'
+    printf "┤${RESET}"
+}
+
+draw_header() {
+    tput cup 0 "$COL"
+    printf "${BLUE}╭$(draw_hline)╮${RESET}"
+
+    tput cup 1 "$COL"
+    printf "${BLUE}│${RESET}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}    ${BOLD}${BRIGHT_BLUE}Claude Code Launcher${RESET} ${DIM}v${LAUNCHER_VERSION}${RESET}"
+    tput cup 1 $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    tput cup 2 "$COL"
+    printf "${BLUE}│${RESET}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}   ${WHITE}Found claude code version:${RESET} ${BRIGHT_GREEN}v${CLAUDE_VERSION}${RESET}"
+    tput cup 2 $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    tput cup 3 "$COL"
+    printf "${BLUE}│${RESET}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}"
+    tput cup 3 $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    draw_empty_row 4
+
+    tput cup 5 "$COL"
+    printf "${BLUE}│${RESET}  ${BRIGHT_CYAN}SPACE${RESET} ${DIM}toggle${RESET}  ${BRIGHT_CYAN}↑↓←→${RESET} ${DIM}navigate${RESET}  ${BRIGHT_CYAN}ENTER${RESET} ${DIM}launch${RESET}  ${BRIGHT_CYAN}ESC${RESET} ${DIM}or${RESET} ${BRIGHT_CYAN}Q${RESET} ${DIM}to quit${RESET}"
+    tput cup 5 $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    tput cup 6 "$COL"
+    printf "${BLUE}├$(draw_hline)┤${RESET}"
+}
+
+draw_option_cell() {
+    local flat_idx=$1 is_cursor=$2
+    if ((flat_idx < 0)); then
+        printf "%-${HALF_W}s" ""
+        return
+    fi
+
+    local flag="${OPT_FLAG[$flat_idx]}"
+    local checkbox
+    if [[ "${SELECTED[$flat_idx]}" == "1" ]]; then
+        checkbox="${BRIGHT_GREEN}[✔]${RESET}"
+    else
+        checkbox="${DIM}[ ]${RESET}"
+    fi
+
+    local val_display=""
+    if [[ -n "${VALUES[$flat_idx]}" ]]; then
+        local val="${VALUES[$flat_idx]}"
+        local flag_len=${#flag}
+        local max_val_len=$((HALF_W - flag_len - 9))
+        ((max_val_len < 3)) && max_val_len=3
+        if ((${#val} > max_val_len)); then
+            val="${val:0:$((max_val_len - 1))}…"
+        fi
+        val_display=" ${BRIGHT_YELLOW}= ${val}${RESET}"
+    fi
+
+    if ((is_cursor)); then
+        printf " ${checkbox} ${BG_CURSOR}${BRIGHT_WHITE}%s${RESET}%b" "$flag" "$val_display"
+    else
+        printf " ${checkbox} ${BRIGHT_BLUE}%s${RESET}%b" "$flag" "$val_display"
+    fi
+}
+
+draw_option_row() {
+    local screen_row=$1 g=$2 r=$3
+    local left_idx right_idx
+    left_idx=$(grid_to_flat "$g" "$r" 0)
+    right_idx=$(grid_to_flat "$g" "$r" 1)
+
+    local left_cur=0 right_cur=0
+    if ((g == CUR_GROUP && r == CUR_ROW && CUR_COL == 0)); then
+        left_cur=1
+    fi
+    if ((g == CUR_GROUP && r == CUR_ROW && CUR_COL == 1)); then
+        right_cur=1
+    fi
+
+    tput cup "$screen_row" "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+    tput cup "$screen_row" "$COL"
+    printf "${BLUE}│${RESET}"
+
+    draw_option_cell "$left_idx" "$left_cur"
+
+    tput cup "$screen_row" $((COL + 2 + HALF_W))
+    draw_option_cell "$right_idx" "$right_cur"
+
+    tput cup "$screen_row" $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+}
+
+draw_content() {
+    local sticky_g
+    sticky_g=$(find_sticky_group)
+    local offset=0
+
+    if ((sticky_g >= 0)); then
+        draw_group_header_at "$HEADER_H" "$sticky_g"
+        offset=1
+    fi
+
+    for ((si = offset; si < CONTENT_H; si++)); do
+        local mi=$((SCROLL + si - offset))
+        local screen_row=$((HEADER_H + si))
+
+        if ((mi >= TOTAL_ROWS)); then
+            draw_empty_row "$screen_row"
+            continue
+        fi
+
+        local entry="${ROW_MAP[$mi]}"
+        local type="${entry%%:*}"
+        local rest="${entry#*:}"
+
+        case "$type" in
+            header)
+                local g="$rest"
+                draw_group_header_at "$screen_row" "$g"
+                ;;
+            option)
+                local g="${rest%%:*}"
+                local r="${rest#*:}"
+                draw_option_row "$screen_row" "$g" "$r"
+                ;;
+            blank)
+                draw_empty_row "$screen_row"
+                ;;
+        esac
+    done
+}
+
+draw_footer() {
+    local row=$((HEADER_H + CONTENT_H))
+
+    tput cup "$row" "$COL"
+    printf "${BLUE}├$(draw_hline)┤${RESET}"
+
+    local flat_idx
+    flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
+    tput cup $((row + 1)) "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+    tput cup $((row + 1)) "$COL"
+    if ((flat_idx >= 0)); then
+        local desc="${OPT_DESC[$flat_idx]}"
+        local arg="${OPT_ARG[$flat_idx]}"
+        if [[ -n "$arg" ]]; then
+            printf "${BLUE}│${RESET}  ${BOLD}${BRIGHT_YELLOW}DESCRIPTION:${RESET} ${BOLD}${BRIGHT_WHITE}%s${RESET} ${BRIGHT_CYAN}(%s)${RESET}" "$desc" "$arg"
+        else
+            printf "${BLUE}│${RESET}  ${BOLD}${BRIGHT_YELLOW}DESCRIPTION:${RESET} ${BOLD}${BRIGHT_WHITE}%s${RESET}" "$desc"
+        fi
+    else
+        printf "${BLUE}│${RESET}"
+    fi
+    tput cup $((row + 1)) $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    tput cup $((row + 2)) "$COL"
+    printf "${BLUE}├$(draw_hline)┤${RESET}"
+
+    local summary=""
+    for ((i = 0; i < NUM_OPTS; i++)); do
+        if [[ "${SELECTED[$i]}" == "1" ]]; then
+            [[ -n "$summary" ]] && summary+=" "
+            summary+="${OPT_FLAG[$i]}"
+            [[ -n "${VALUES[$i]}" ]] && summary+=" ${VALUES[$i]}"
+        fi
+    done
+
+    tput cup $((row + 3)) "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+    tput cup $((row + 3)) "$COL"
+    if [[ -n "$summary" ]]; then
+        printf "${BLUE}│${RESET}  ${BRIGHT_GREEN}❯${RESET} ${BRIGHT_WHITE}claude${RESET} ${YELLOW}%s${RESET}" "$summary"
+    else
+        printf "${BLUE}│${RESET}  ${DIM}❯ claude (no options selected)${RESET}"
+    fi
+    tput cup $((row + 3)) $((COL + BOX_W - 1))
+    printf "${BLUE}│${RESET}"
+
+    tput cup $((row + 4)) "$COL"
+    printf "${BLUE}╰$(draw_hline)╯${RESET}"
+}
+
+draw_all() {
+    clear
+    draw_header
+    draw_content
+    draw_footer
+}
+
+# ── Input prompt ────────────────────────────────────────────────────────────
+prompt_value() {
+    local flat_idx=$1
+    local flag="${OPT_FLAG[$flat_idx]}"
+    local arg="${OPT_ARG[$flat_idx]}"
+
+    local row=$((HEADER_H + CONTENT_H + 3))
+
+    tput cup "$row" "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+    tput cup "$row" "$COL"
+    printf "${BLUE}│${RESET}  ${BRIGHT_YELLOW}%s${RESET} ${BRIGHT_CYAN}➜${RESET} " "$flag"
+
+    printf "%s" "$SHOW_CURSOR"
+    stty "$ORIG_STTY"
+
+    local input
+    read -r input
+
+    stty -echo -icanon min 1 time 0
+    printf "%s" "$HIDE_CURSOR"
+
+    VALUES[$flat_idx]="$input"
+    if [[ -z "$input" ]]; then
+        SELECTED[$flat_idx]="0"
+    fi
+}
+
+# ── Navigation ──────────────────────────────────────────────────────────────
+clamp_col() {
+    local flat_idx
+    flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
+    if ((flat_idx < 0)); then
+        CUR_COL=0
+    fi
+}
+
+move_up() {
+    if ((CUR_ROW > 0)); then
+        ((CUR_ROW--))
+        clamp_col
+    elif ((CUR_GROUP > 0)); then
+        ((CUR_GROUP--))
+        CUR_ROW=$(( $(group_rows "$CUR_GROUP") - 1 ))
+        clamp_col
+    fi
+}
+
+move_down() {
+    local max_row=$(( $(group_rows "$CUR_GROUP") - 1 ))
+    if ((CUR_ROW < max_row)); then
+        ((CUR_ROW++))
+        clamp_col
+    elif ((CUR_GROUP < NUM_GROUPS - 1)); then
+        ((CUR_GROUP++))
+        CUR_ROW=0
+        clamp_col
+    fi
+}
+
+move_left() {
+    if ((CUR_COL > 0)); then
+        CUR_COL=0
+    fi
+}
+
+move_right() {
+    if ((CUR_COL == 0)); then
+        local flat_idx
+        flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" 1)
+        if ((flat_idx >= 0)); then
+            CUR_COL=1
+        fi
+    fi
+}
+
+# ── Main loop ───────────────────────────────────────────────────────────────
+draw_all
+
+while true; do
+    IFS= read -rsn1 key
+
+    case "$key" in
+        $'\x1b')
+            read -rsn1 -t 0.1 seq1 || true
+            if [[ -z "$seq1" ]]; then
+                cleanup
+                echo "Cancelled."
+                exit 0
+            fi
+            read -rsn1 -t 0.1 seq2 || true
+            case "${seq1}${seq2}" in
+                '[A') move_up ;;
+                '[B') move_down ;;
+                '[D') move_left ;;
+                '[C') move_right ;;
+                '[5')
+                    read -rsn1 -t 0.1 || true
+                    if ((CUR_GROUP > 0)); then
+                        ((CUR_GROUP--))
+                        CUR_ROW=0
+                        clamp_col
+                    fi
+                    ;;
+                '[6')
+                    read -rsn1 -t 0.1 || true
+                    if ((CUR_GROUP < NUM_GROUPS - 1)); then
+                        ((CUR_GROUP++))
+                        CUR_ROW=0
+                        clamp_col
+                    fi
+                    ;;
+            esac
+            ;;
+        q|Q)
+            cleanup
+            echo "Cancelled."
+            exit 0
+            ;;
+        ' ')
+            flat_idx=$(grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL")
+            if ((flat_idx >= 0)); then
+                if [[ "${SELECTED[$flat_idx]}" == "1" ]]; then
+                    SELECTED[$flat_idx]="0"
+                    VALUES[$flat_idx]=""
+                else
+                    SELECTED[$flat_idx]="1"
+                    if [[ -n "${OPT_ARG[$flat_idx]}" ]]; then
+                        prompt_value "$flat_idx"
+                    fi
+                fi
+            fi
+            ;;
+        ''|$'\n')
+            break
+            ;;
+    esac
+
+    ensure_visible
+
+    if [[ "$NEED_REDRAW" == true ]]; then
+        NEED_REDRAW=false
+        calc_dimensions
+        build_row_map
+        draw_all
+    else
+        draw_content
+        draw_footer
+    fi
+done
+
+# ── Build command ───────────────────────────────────────────────────────────
+cleanup
+
+CMD_ARGS=()
+for ((i = 0; i < NUM_OPTS; i++)); do
+    if [[ "${SELECTED[$i]}" == "1" ]]; then
+        CMD_ARGS+=("${OPT_FLAG[$i]}")
+        if [[ -n "${OPT_ARG[$i]}" && -n "${VALUES[$i]}" ]]; then
+            CMD_ARGS+=("${VALUES[$i]}")
+        fi
+    fi
+done
+
+SEP=14
+LAUNCH_DRAWN=0
+CL=$'\033[2K'
+
+draw_launch_screen() {
+    local w
+    w=$(tput cols)
+    local rc="${BLUE}│${RESET}"
+
+    local heading
+    if [[ ${#CMD_ARGS[@]} -eq 0 ]]; then
+        heading="${BOLD}${BRIGHT_WHITE}No options selected. Riding bareback.${RESET} ${BRIGHT_MAGENTA}¯\\_(ツ)_/¯${RESET}"
+    else
+        heading="${BOLD}${BRIGHT_CYAN}CLAUNCHING:${RESET}"
+    fi
+
+    if ((LAUNCH_DRAWN)); then
+        printf "\033[8A"
+    fi
+
+    printf "${CL}\n"
+    printf "${CL}${BLUE}╭$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '━')┯$(printf '%*s' "$((w - SEP - 1))" '' | tr ' ' '━')${RESET}\n"
+    printf "${CL}${rc}%-$((SEP - 1))s${rc} %b\n" "" "$heading"
+    printf "${CL}${rc}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}   ${rc} ${BRIGHT_GREEN}❯${RESET} ${BRIGHT_WHITE}claude${RESET} ${YELLOW}%s${RESET}\n" "${CMD_ARGS[*]}"
+    printf "${CL}${rc}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}  ${rc}\n"
+    printf "${CL}${rc}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}    ${rc}\n"
+    printf "${CL}${rc}%-$((SEP - 1))s${rc} ${DIM}(ENTER to launch / ESC to cancel)${RESET}\n" ""
+    printf "${CL}${BLUE}╰$(printf '%*s' "$((SEP - 1))" '' | tr ' ' '─')┴$(printf '%*s' "$((w - SEP - 2))" '' | tr ' ' '─')━${RESET}\n"
+
+    LAUNCH_DRAWN=1
+}
+
+draw_countdown() {
+    local n=$1
+    printf "\033[3A\033[%dG" "$((SEP + 3))"
+    printf "${BRIGHT_CYAN}Launching in ${BOLD}%d${RESET}${BRIGHT_CYAN}s...${RESET}    " "$n"
+    printf "\033[3B\r"
+}
+
+draw_launch_screen
+NEED_REDRAW_LAUNCH=false
+handle_resize_launch() { NEED_REDRAW_LAUNCH=true; }
+trap handle_resize_launch WINCH
+
+stty -echo -icanon min 0 time 0
+for ((countdown = 5; countdown > 0; countdown--)); do
+    draw_countdown "$countdown"
+    for ((tick = 0; tick < 10; tick++)); do
+        if [[ "$NEED_REDRAW_LAUNCH" == true ]]; then
+            NEED_REDRAW_LAUNCH=false
+            draw_launch_screen
+            draw_countdown "$countdown"
+        fi
+        ch=""
+        if IFS= read -rsn1 -t 0.1 ch; then
+            if [[ "$ch" == "" || "$ch" == $'\n' ]]; then
+                stty "$ORIG_STTY"
+                exec "$CLAUDE_BIN" "${CMD_ARGS[@]}"
+            elif [[ "$ch" == $'\x1b' ]]; then
+                stty "$ORIG_STTY"
+                echo "Aborted."
+                exit 0
+            fi
+        fi
+    done
+done
+stty "$ORIG_STTY"
+exec "$CLAUDE_BIN" "${CMD_ARGS[@]}"

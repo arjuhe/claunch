@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="460" viewBox="0 0 780 460">
+  <!-- Background -->
+  <rect width="780" height="460" rx="8" fill="#0a0e14"/>
+
+  <!-- Window chrome -->
+  <circle cx="20" cy="16" r="6" fill="#ff5f57"/>
+  <circle cx="40" cy="16" r="6" fill="#febc2e"/>
+  <circle cx="60" cy="16" r="6" fill="#28c840"/>
+
+  <!-- Main box -->
+  <rect x="14" y="38" width="752" height="406" rx="5" fill="none" stroke="#1370d3" stroke-width="1.5"/>
+
+  <!-- ═══ HEADER ═══ -->
+
+  <!-- Robot logo (pixel art with rects) -->
+  <rect x="42" y="50" width="4" height="14" fill="#e26be2"/>
+  <rect x="46" y="46" width="8" height="18" fill="#e26be2"/>
+  <rect x="54" y="46" width="8" height="18" fill="#e26be2"/>
+  <rect x="62" y="46" width="8" height="18" fill="#e26be2"/>
+  <rect x="70" y="46" width="8" height="18" fill="#e26be2"/>
+  <rect x="78" y="46" width="8" height="18" fill="#e26be2"/>
+  <rect x="86" y="50" width="4" height="14" fill="#e26be2"/>
+
+  <rect x="34" y="68" width="8" height="14" fill="#e26be2"/>
+  <rect x="42" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="50" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="58" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="66" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="74" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="82" y="64" width="8" height="18" fill="#e26be2"/>
+  <rect x="90" y="64" width="8" height="14" fill="#e26be2"/>
+
+  <rect x="50" y="84" width="6" height="6" fill="#e26be2"/>
+  <rect x="58" y="84" width="6" height="6" fill="#e26be2"/>
+  <rect x="72" y="84" width="6" height="6" fill="#e26be2"/>
+  <rect x="80" y="84" width="6" height="6" fill="#e26be2"/>
+
+  <!-- Title text -->
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="110" y="60" fill="#60a4ec" font-weight="bold" font-size="15">Claude Code Launcher</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="310" y="60" fill="#888" font-size="12">v0</text>
+
+  <!-- Version text -->
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="110" y="78" fill="#ddd" font-size="12">Found claude code version:</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="325" y="78" fill="#95dc55" font-size="12">v2.1.220</text>
+
+  <!-- Key bindings -->
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="30" y="112" fill="#60b6cb" font-weight="bold" font-size="11">SPACE</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="78" y="112" fill="#888" font-size="11">toggle</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="130" y="112" fill="#60b6cb" font-weight="bold" font-size="11">&#x2191;&#x2193;&#x2190;&#x2192;</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="172" y="112" fill="#888" font-size="11">navigate</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="238" y="112" fill="#60b6cb" font-weight="bold" font-size="11">ENTER</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="286" y="112" fill="#888" font-size="11">launch</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="336" y="112" fill="#60b6cb" font-weight="bold" font-size="11">ESC</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="364" y="112" fill="#888" font-size="11">or</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="382" y="112" fill="#60b6cb" font-weight="bold" font-size="11">Q</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="396" y="112" fill="#888" font-size="11">to quit</text>
+
+  <!-- Header bottom divider -->
+  <line x1="14" y1="126" x2="766" y2="126" stroke="#1370d3" stroke-width="1"/>
+
+  <!-- ═══ SESSION ═══ -->
+  <line x1="14" y1="126" x2="14" y2="146" stroke="#1370d3" stroke-width="1"/>
+  <line x1="766" y1="126" x2="766" y2="146" stroke="#1370d3" stroke-width="1"/>
+  <line x1="14" y1="146" x2="24" y2="146" stroke="#1370d3" stroke-width="1"/>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="28" y="150" fill="#60b6cb" font-weight="bold" font-size="12">SESSION</text>
+  <line x1="92" y1="146" x2="766" y2="146" stroke="#1370d3" stroke-width="1"/>
+
+  <rect x="52" y="158" width="90" height="18" rx="2" fill="#007acc"/>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="170" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="170" fill="#f7f7f7" font-weight="bold">--continue</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="170" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="430" y="170" fill="#60a4ec">--resume</text>
+
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="194" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="194" fill="#60a4ec">--fork-session</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="194" fill="#95dc55" font-size="12">[&#x2714;]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="430" y="194" fill="#60a4ec">--name</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="490" y="194" fill="#ffe763">= mySession</text>
+
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="218" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="218" fill="#60a4ec">--session-id</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="218" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="430" y="218" fill="#60a4ec">--from-pr</text>
+
+  <!-- ═══ MODEL ═══ -->
+  <line x1="14" y1="236" x2="24" y2="236" stroke="#1370d3" stroke-width="1"/>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="28" y="240" fill="#60b6cb" font-weight="bold" font-size="12">MODEL</text>
+  <line x1="78" y1="236" x2="766" y2="236" stroke="#1370d3" stroke-width="1"/>
+
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="260" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="260" fill="#60a4ec">--model</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="260" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="430" y="260" fill="#60a4ec">--effort</text>
+
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="284" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="284" fill="#60a4ec">--fallback-model</text>
+
+  <!-- ═══ PROMPT & OUTPUT ═══ -->
+  <line x1="14" y1="304" x2="24" y2="304" stroke="#1370d3" stroke-width="1"/>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="28" y="308" fill="#60b6cb" font-weight="bold" font-size="12">PROMPT &amp; OUTPUT</text>
+  <line x1="155" y1="304" x2="766" y2="304" stroke="#1370d3" stroke-width="1"/>
+
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="328" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="56" y="328" fill="#60a4ec">--system-prompt</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="400" y="328" fill="#888" font-size="12">[ ]</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="430" y="328" fill="#60a4ec">--append-system-prompt</text>
+
+  <!-- ═══ FOOTER ═══ -->
+
+  <!-- Description divider -->
+  <line x1="14" y1="350" x2="766" y2="350" stroke="#1370d3" stroke-width="1"/>
+
+  <!-- Description bar -->
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="370" fill="#ffe763" font-weight="bold" font-size="12">DESCRIPTION:</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="130" y="370" fill="#f7f7f7" font-weight="bold">Continue most recent conversation</text>
+
+  <!-- Command preview divider -->
+  <line x1="14" y1="386" x2="766" y2="386" stroke="#1370d3" stroke-width="1"/>
+
+  <!-- Command preview -->
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="26" y="410" fill="#95dc55" font-size="15">&#x276F;</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="42" y="410" fill="#f7f7f7">claude</text>
+  <text font-family="Menlo,Monaco,Consolas,monospace" x="94" y="410" fill="#ffe763">--name mySession</text>
+</svg>
