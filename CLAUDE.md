@@ -1,4 +1,6 @@
-# CLAUDE.md — claunch
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -19,6 +21,18 @@ The entire project is a single bash script (`claunch`). No external dependencies
 - **Raw terminal input** — `stty -echo -icanon` for keystroke-by-keystroke reading. Original stty settings saved in `ORIG_STTY` and restored on exit and during value input prompts.
 - **ESC key detection** — reads 1 byte after `\x1b` with 100ms timeout (`read -rsn1 -t 0.1`) to distinguish bare ESC (quit) from arrow key sequences (`\x1b[A`, etc.).
 
+### Performance (no-fork rendering)
+
+The render path is deliberately fork-free — every keystroke redraws without spawning subprocesses, which is what makes navigation feel instant:
+
+- **`cup()` instead of `tput cup`** — cursor positioning is done with a raw `printf '\033[%d;%dH'` escape rather than `tput`, which would fork per call.
+- **Pre-generated dash strings** — `_DASHES` / `_HEAVY_DASHES` are built once (300-char strings) and sliced with `${_DASHES:0:N}`, avoiding repeated string construction.
+- **`_partial_redraw()`** — on ordinary cursor movement (no scroll, no resize) only the two affected option rows (old + new cursor position) are repainted, plus the footer. Full `draw_all()` is reserved for resize; `draw_content` + `draw_footer` for scroll changes. See the redraw dispatch at the bottom of the main loop.
+
+### Launch / Countdown Screen
+
+After the user presses ENTER, the TUI tears down (`cleanup`, leaves the alternate screen) and `draw_launch_screen()` renders a confirmation box in the normal buffer showing the assembled `claude` command. A 5-second countdown (`draw_countdown()`) then runs; ENTER launches immediately, ESC aborts. The final launch uses `exec "$CLAUDE_BIN" "${CMD_ARGS[@]}"` so claude replaces the launcher process. The countdown screen redraws itself in place using cursor-up escapes (`\033[8A`) and handles resize via its own WINCH trap.
+
 ### Color Palette
 
 Uses the **Aardvark Blue** iTerm2 color palette with 24-bit RGB true-color escape sequences (`\033[38;2;R;G;Bm`). All color variables are defined at the top of the script.
@@ -35,7 +49,7 @@ Options are defined in a flat array `FLAT_OPTS` using the format `"flag|descript
 
 ```
 Row 0:     ╭── top border ──╮
-Row 1:     │ logo + "claunch v0"
+Row 1:     │ logo + "Claude Code Launcher v0"
 Row 2:     │ logo + "Found claude code version: vX.Y.Z"
 Row 3:     │ logo feet
 Row 4:     │ (blank)
@@ -79,6 +93,15 @@ bash -n claunch
 
 # Run directly
 ./claunch
+
+# claunch's own help
+./claunch --help
+```
+
+### Installing
+```bash
+# Symlinks ./claunch → /usr/local/bin/claunch (uses sudo)
+./install.sh
 ```
 
 ### Updating options
@@ -88,5 +111,4 @@ Edit the `FLAT_OPTS` array. Format: `"--flag|Human-readable description|arg_hint
 
 - `--exclude-dynamic-system-prompt` should be `--exclude-dynamic-system-prompt-sections` (per `claude --help`)
 - Options list should be synced against latest `claude --help` output — some flags may be missing or renamed
-- No `--version` / `--help` flags for claunch itself yet
-- No install script or packaging yet
+- No `--version` flag for claunch itself yet (`--help` is implemented; version is hardcoded in `LAUNCHER_VERSION`)
