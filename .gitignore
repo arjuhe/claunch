@@ -1,0 +1,15 @@
+# Generated launcher scripts (contain user paths and config)
+claude-launch
+*-launcher
+*-launch
+
+# Local-only Claude Code settings
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.bak
+*~

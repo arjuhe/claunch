@@ -18,6 +18,7 @@ your selected configuration.
 Controls:
   ↑↓←→        Navigate options
   SPACE        Toggle option (prompts for value if needed)
+  W            Write selected options as standalone script
   ENTER        Launch claude with selected options
   ESC / Q      Quit
 
@@ -68,6 +69,8 @@ printf -v _HEAVY_DASHES '%300s' ''
 _HEAVY_DASHES="${_HEAVY_DASHES// /━}"
 
 # ── Option definitions ──────────────────────────────────────────────────────
+# Synced with Claude Code version: 2.1.311 on 2026-11-04
+# See .claude/workflows/claude-code-version-sync.md for sync workflow
 FLAT_OPTS=(
     "---|Session|"
     "--continue|Continue most recent conversation|"
@@ -76,32 +79,39 @@ FLAT_OPTS=(
     "--name|Session display name|name"
     "--session-id|Use specific session ID|UUID"
     "--from-pr|Resume session linked to a PR|PR number or URL (optional)"
+    "--cloud|Create/attach to cloud session|description/session_id/URL (optional)"
+    "--desktop|Open in Claude Desktop app|"
+    "--teleport|Resume a teleport session|session ID (optional)"
 
     "---|Model|"
     "--model|Model selection|model (opus/sonnet/fable/haiku)"
     "--effort|Effort level|level (low/medium/high/xhigh/max)"
     "--fallback-model|Fallback model on overload|model (comma-separated list)"
+    "--autocompact|Auto-compact window size|auto or 100k-1M tokens"
 
     "---|Prompt & Output|"
     "--system-prompt|Override system prompt|prompt text"
     "--append-system-prompt|Append to default system prompt|prompt text"
+    "--system-prompt-snapshot|Record system prompt once per conversation|on/off"
     "--print|Print response and exit (non-interactive)|"
     "--input-format|Input format (with --print)|format (text/stream-json)"
     "--output-format|Output format (with --print)|format (text/json/stream-json)"
     "--json-schema|Structured output JSON schema|JSON schema"
-    "--prompt-suggestions|Enable prompt suggestions|"
-    "--verbose|Verbose output|"
+    "--prompt-suggestions|Enable prompt suggestions|true/false/1/0/yes/no/on/off"
+    "--verbose|Verbose output override|"
 
     "---|Permissions|"
-    "--permission-mode|Permission mode|mode (acceptEdits/auto/manual/dontAsk/plan)"
+    "--permission-mode|Permission mode|mode (acceptEdits/auto/bypassPermissions/manual/dontAsk/plan)"
+    "--permission-prompts|Who answers permission prompts|target (host/none)"
     "--allow-dangerously-skip-permissions|Enable skip-permissions as an option|"
     "--dangerously-skip-permissions|Bypass ALL permission checks|"
+    "--restricted|Restricted mode (confined file access, no dangerous tools)|"
 
     "---|Tools|"
     "--allowed-tools|Allowed tool names|tools (e.g. \"Bash(git *) Edit\")"
     "--disallowed-tools|Denied tool names|tools (e.g. \"Bash(git *) Edit\")"
     "--tools|Built-in tool list|tools (e.g. \"Bash,Edit,Read\" or \"default\")"
-    "--disable-slash-commands|Disable all skills|"
+    "--disable-slash-commands|Disable all skills and commands|"
 
     "---|Environment|"
     "--add-dir|Additional directories to allow|directories"
@@ -113,13 +123,14 @@ FLAT_OPTS=(
     "--setting-sources|Setting sources to load|sources (user,project,local)"
     "--agents|Custom agents JSON definition|JSON object"
     "--agent|Agent for this session|agent name"
+    "--environment|Create cloud session on self-hosted environment|environment_id (ccpool_...)"
 
     "---|Mode|"
     "--background|Start as background agent|"
     "--bare|Minimal mode (skip hooks, LSP, plugins, etc.)|"
     "--safe-mode|Disable all customizations|"
     "--brief|Brief agent mode (SendUserMessage tool)|"
-    "--debug|Debug mode with optional filter|filter (e.g. api,hooks)"
+    "--debug|Debug mode with optional filter|filter (e.g. hooks,mcp or !hooks,!mcp)"
     "--debug-file|Write debug logs to file|file path"
     "--ide|Auto-connect to IDE on startup|"
     "--chrome|Enable Chrome integration|"
@@ -127,17 +138,18 @@ FLAT_OPTS=(
 
     "---|Advanced|"
     "--worktree|Git worktree session|worktree name (optional)"
-    "--tmux|Create tmux session for worktree|"
+    "--tmux|Create tmux session for worktree (iTerm2 native panes when available)|classic (optional)"
     "--max-budget-usd|Max API spend (with --print)|dollar amount"
     "--ax-screen-reader|Screen-reader friendly output|"
     "--betas|Beta headers for API requests|betas"
-    "--exclude-dynamic-system-prompt|Move per-machine sections to first user msg|"
+    "--exclude-dynamic-system-prompt-sections|Move per-machine sections to first user msg|"
     "--no-session-persistence|Disable session persistence (with --print)|"
     "--forward-subagent-text|Forward subagent text blocks (with --print)|"
     "--include-hook-events|Include hook events in output stream|"
     "--include-partial-messages|Include partial message chunks (with --print)|"
     "--replay-user-messages|Re-emit user messages on stdout|"
     "--remote-control|Start with Remote Control enabled|name (optional)"
+    "--remote-control-session-name-prefix|Prefix for auto-generated Remote Control session names|prefix"
     "--file|File resources to download at startup|file_id:relative_path"
 )
 
@@ -321,7 +333,7 @@ draw_header() {
     draw_empty_row 4
 
     cup 5 "$COL"
-    printf "${BLUE}│${RESET}  ${BRIGHT_CYAN}SPACE${RESET} ${DIM}toggle${RESET}  ${BRIGHT_CYAN}↑↓←→${RESET} ${DIM}navigate${RESET}  ${BRIGHT_CYAN}ENTER${RESET} ${DIM}launch${RESET}  ${BRIGHT_CYAN}ESC${RESET} ${DIM}or${RESET} ${BRIGHT_CYAN}Q${RESET} ${DIM}to quit${RESET}"
+    printf "${BLUE}│${RESET}  ${BRIGHT_CYAN}SPACE${RESET} ${DIM}toggle${RESET}  ${BRIGHT_CYAN}↑↓←→${RESET} ${DIM}navigate${RESET}  ${BRIGHT_CYAN}W${RESET} ${DIM}write script${RESET}  ${BRIGHT_CYAN}ENTER${RESET} ${DIM}launch${RESET}  ${BRIGHT_CYAN}ESC/Q${RESET} ${DIM}quit${RESET}"
     cup 5 $((COL + BOX_W - 1))
     printf "${BLUE}│${RESET}"
 
@@ -517,6 +529,134 @@ prompt_value() {
     fi
 }
 
+write_script() {
+    local row=$((HEADER_H + CONTENT_H + 3))
+
+    cup "$row" "$COL"
+    printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+    cup "$row" "$COL"
+    printf "${BLUE}│${RESET}  ${BRIGHT_YELLOW}Output script path/filename${RESET} ${DIM}(default: ./claude-launch)${RESET} ${BRIGHT_CYAN}➜${RESET} "
+
+    printf "%s" "$SHOW_CURSOR"
+    stty "$ORIG_STTY"
+
+    local input
+    read -r input
+
+    stty -echo -icanon min 1 time 0
+    printf "%s" "$HIDE_CURSOR"
+
+    if [[ -z "$input" ]]; then
+        input="./claude-launch"
+    fi
+
+    if [[ -e "$input" ]]; then
+        cup "$row" "$COL"
+        printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+        cup "$row" "$COL"
+        printf "${BLUE}│${RESET}  ${RED}FILE: ${YELLOW}%s${RESET} ${RED}EXISTS! YES TO OVERWRITE${RESET} ${DIM}(y/N)${RESET} ${BRIGHT_CYAN}➜${RESET} " "$input"
+
+        printf "%s" "$SHOW_CURSOR"
+        stty "$ORIG_STTY"
+
+        local confirm
+        read -r confirm
+
+        stty -echo -icanon min 1 time 0
+        printf "%s" "$HIDE_CURSOR"
+
+        if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            cup "$row" "$COL"
+            printf "${BLUE}│${RESET}%-$((BOX_W - 2))s${BLUE}│${RESET}" ""
+            cup "$row" "$COL"
+            printf "${BLUE}│${RESET}  ${DIM}Cancelled.${RESET}%-$((BOX_W - 16))s${BLUE}│${RESET}" ""
+            sleep 1
+            return
+        fi
+    fi
+
+    local full_path
+    if [[ "$input" = /* ]]; then
+        full_path="$input"
+    else
+        full_path="$(pwd)/$input"
+    fi
+
+    local has_selections=0
+    for ((i = 0; i < NUM_OPTS; i++)); do
+        if [[ "${SELECTED[$i]}" == "1" ]]; then
+            has_selections=1
+            break
+        fi
+    done
+
+    {
+        printf "#!/usr/bin/env bash\n"
+        printf "# %s\n"  "$full_path"
+        printf "# Generated by claunch - https://github.com/arjuhe/claunch\n\n"
+
+        if ((has_selections)); then
+            local last_idx=-1
+            for ((i = 0; i < NUM_OPTS; i++)); do
+                if [[ "${SELECTED[$i]}" == "1" ]]; then
+                    last_idx=$i
+                fi
+            done
+
+            printf "exec claude"
+            for ((i = 0; i < NUM_OPTS; i++)); do
+                if [[ "${SELECTED[$i]}" == "1" ]]; then
+                    if ((i == last_idx)); then
+                        if [[ -n "${OPT_ARG[$i]}" && -n "${VALUES[$i]}" ]]; then
+                            printf " \\\\\n  %s %q\n" "${OPT_FLAG[$i]}" "${VALUES[$i]}"
+                        else
+                            printf " \\\\\n  %s\n" "${OPT_FLAG[$i]}"
+                        fi
+                    else
+                        if [[ -n "${OPT_ARG[$i]}" && -n "${VALUES[$i]}" ]]; then
+                            printf " \\\\\n  %s %q" "${OPT_FLAG[$i]}" "${VALUES[$i]}"
+                        else
+                            printf " \\\\\n  %s" "${OPT_FLAG[$i]}"
+                        fi
+                    fi
+                fi
+            done
+        else
+            printf "exec claude\n"
+        fi
+    } > "$input"
+
+    chmod +x "$input"
+
+    cleanup
+
+    local w
+    w=$(tput cols)
+    local rc="${BLUE}│${RESET}"
+    SEP=14
+    CL=$'\033[2K'
+
+    local exec_cmd
+    if [[ "$input" == ./* || "$input" == /* ]]; then
+        exec_cmd="$input"
+    else
+        exec_cmd="./$input"
+    fi
+
+    printf "\n"
+    printf "${BLUE}╭%s┯%s${RESET}\n" "${_HEAVY_DASHES:0:$((SEP - 1))}" "${_HEAVY_DASHES:0:$((w - SEP - 1))}"
+    printf "${rc}%-$((SEP - 1))s${rc} ${BOLD}${BRIGHT_CYAN}Script Generated Successfully!${RESET}\n" ""
+    printf "${rc}   ${BRIGHT_MAGENTA}▐▛███▜▌${RESET}   ${rc} ${BRIGHT_GREEN}✓${RESET} ${WHITE}Wrote:${RESET} ${BRIGHT_WHITE}%s${RESET}\n" "$input"
+    printf "${rc}  ${BRIGHT_MAGENTA}▝▜█████▛▘${RESET}  ${rc}\n"
+    printf "${rc}    ${BRIGHT_MAGENTA}▘▘${RESET} ${BRIGHT_MAGENTA}▝▝${RESET}    ${rc}\n"
+    printf "${rc}%-$((SEP - 1))s${rc} ${DIM}Run it with:${RESET} ${BRIGHT_GREEN}%s${RESET}\n" "" "$exec_cmd"
+    printf "${rc}%-$((SEP - 1))s${rc} ${YELLOW}Happy coding!${RESET} ${BRIGHT_MAGENTA}◡̈${RESET}\n" ""
+    printf "${BLUE}╰%s┴%s${RESET}\n" "${_DASHES:0:$((SEP - 1))}" "${_DASHES:0:$((w - SEP - 2))}"
+    printf "\n"
+
+    exit 0
+}
+
 # ── Navigation ──────────────────────────────────────────────────────────────
 clamp_col() {
     grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL"
@@ -632,6 +772,9 @@ while true; do
             cleanup
             echo "Cancelled."
             exit 0
+            ;;
+        w|W)
+            write_script
             ;;
         ' ')
             grid_to_flat "$CUR_GROUP" "$CUR_ROW" "$CUR_COL"
