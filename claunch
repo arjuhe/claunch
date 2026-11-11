@@ -5,15 +5,40 @@ set -uo pipefail
 
 LAUNCHER_VERSION="0"
 
+if [[ "${1:-}" == "--version" || "${1:-}" == "-V" ]]; then
+    echo "claunch version $LAUNCHER_VERSION"
+    exit 0
+fi
+
+SCRIPT_TO_LOAD=""
+if [[ "${1:-}" == "--load" || "${1:-}" == "-l" ]]; then
+    if [[ -z "${2:-}" ]]; then
+        echo "Error: A script path argument is required"
+        echo "Usage: claunch -l or --load <script_path>"
+        exit 1
+    fi
+    SCRIPT_TO_LOAD="$2"
+    shift 2
+fi
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || "${1:-}" == "help" ]]; then
     cat <<'HELP'
 claunch — TUI launcher for Claude Code
 
-Usage: claunch [--help]
+Usage: claunch [options]
 
 A terminal UI that presents all of Claude Code's CLI options as a
 visual checklist. Toggle flags, enter values, and launch claude with
 your selected configuration.
+
+Options:
+  -l, --load <script_path>
+    Load a previously exported claunch script and pre-populate
+    the TUI with its selections. Use this to edit saved configurations.
+  -V, --version
+    Print claunch version and exit.
+  -h, --help
+    Print this message and exit.
 
 Controls:
   ↑↓←→        Navigate options
@@ -29,6 +54,15 @@ Requirements:
 https://github.com/arjuhe/claunch
 HELP
     exit 0
+fi
+
+# Error on unrecognized arguments
+if [[ -n "${1:-}" ]]; then
+    echo "Error: Unrecognized argument: $1"
+    echo "Usage: claunch [options]"
+    echo ""
+    echo "Run 'claunch --help' for available options."
+    exit 1
 fi
 
 CLAUDE_BIN=$(command -v claude 2>/dev/null || echo "")
@@ -191,6 +225,121 @@ for ((i = 0; i < NUM_OPTS; i++)); do
     SELECTED+=("0")
     VALUES+=("")
 done
+
+# ── Script loading ──────────────────────────────────────────────────────────
+load_script_state() {
+    local script_path="$1"
+
+    # Validate file exists and is readable
+    if [[ ! -f "$script_path" ]]; then
+        echo "Error: Script file not found: $script_path"
+        exit 1
+    fi
+
+    if [[ ! -r "$script_path" ]]; then
+        echo "Error: Script file not readable: $script_path"
+        exit 1
+    fi
+
+    # Extract the exec claude command (handle backslash continuations)
+    local exec_line=""
+    local in_exec=0
+    while IFS= read -r line; do
+        # Trim leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Start capturing at "exec claude"
+        if [[ "$line" =~ ^exec[[:space:]]+claude ]]; then
+            in_exec=1
+            # Remove "exec claude" prefix
+            line="${line#exec}"
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line#claude}"
+            line="${line#"${line%%[![:space:]]*}"}"
+        fi
+
+        if ((in_exec)); then
+            # Remove trailing backslash
+            if [[ "$line" == *\\ ]]; then
+                exec_line+="${line%\\} "
+            else
+                # Last line (no backslash)
+                exec_line+="$line"
+                break
+            fi
+        fi
+    done < "$script_path"
+
+    if [[ -z "$exec_line" ]]; then
+        echo "Error: No 'exec claude' command found in $script_path"
+        echo "This doesn't appear to be a claunch-generated script."
+        exit 1
+    fi
+
+    # Parse tokens from the command line
+    # Use eval to properly handle quoted strings
+    local -a tokens
+    eval "tokens=($exec_line)" 2>/dev/null || {
+        echo "Error: Failed to parse script command"
+        exit 1
+    }
+
+    # Walk through tokens and match to OPT_FLAG[]
+    local i=0
+    local -a unknown_flags
+    while ((i < ${#tokens[@]})); do
+        local token="${tokens[$i]}"
+
+        # Skip non-flag tokens (these are values, handled with their flags)
+        if [[ "$token" != --* ]]; then
+            ((i++))
+            continue
+        fi
+
+        # Find this flag in OPT_FLAG[]
+        local flag_idx=-1
+        for ((j = 0; j < NUM_OPTS; j++)); do
+            if [[ "${OPT_FLAG[$j]}" == "$token" ]]; then
+                flag_idx=$j
+                break
+            fi
+        done
+
+        if ((flag_idx < 0)); then
+            # Unknown flag - skip with warning
+            unknown_flags+=("$token")
+            ((i++))
+            continue
+        fi
+
+        # Mark as selected
+        SELECTED[$flag_idx]="1"
+
+        # Check if this option takes a value
+        if [[ -n "${OPT_ARG[$flag_idx]}" ]]; then
+            # Next token should be the value (if it exists and isn't a flag)
+            if ((i + 1 < ${#tokens[@]})) && [[ "${tokens[$((i + 1))]}" != --* ]]; then
+                VALUES[$flag_idx]="${tokens[$((i + 1))]}"
+                ((i += 2))  # Skip both flag and value
+            else
+                # Flag expects value but none provided - just select it
+                ((i++))
+            fi
+        else
+            # Simple toggle flag
+            ((i++))
+        fi
+    done
+
+    # Show feedback about unknown flags
+    if ((${#unknown_flags[@]} > 0)); then
+        echo "Warning: Skipped unknown flags: ${unknown_flags[*]}"
+        echo "These flags may have been removed in newer claunch versions."
+        echo ""
+        sleep 2
+    fi
+}
 
 # ── Grid helpers ────────────────────────────────────────────────────────────
 group_rows() { _RET=$(( (GROUP_COUNT[$1] + 1) / 2 )); }
@@ -582,6 +731,13 @@ write_script() {
         full_path="$(pwd)/$input"
     fi
 
+    local exec_cmd
+    if [[ "$input" == ./* || "$input" == /* ]]; then
+        exec_cmd="$input"
+    else
+        exec_cmd="./$input"
+    fi
+
     local has_selections=0
     for ((i = 0; i < NUM_OPTS; i++)); do
         if [[ "${SELECTED[$i]}" == "1" ]]; then
@@ -593,7 +749,8 @@ write_script() {
     {
         printf "#!/usr/bin/env bash\n"
         printf "# %s\n"  "$full_path"
-        printf "# Generated by claunch - https://github.com/arjuhe/claunch\n\n"
+        printf "# Generated by claunch - https://github.com/arjuhe/claunch\n"
+        printf "# Pass additional arguments: %s \"your prompt here\"\n\n" "$exec_cmd"
 
         if ((has_selections)); then
             local last_idx=-1
@@ -608,9 +765,9 @@ write_script() {
                 if [[ "${SELECTED[$i]}" == "1" ]]; then
                     if ((i == last_idx)); then
                         if [[ -n "${OPT_ARG[$i]}" && -n "${VALUES[$i]}" ]]; then
-                            printf " \\\\\n  %s %q\n" "${OPT_FLAG[$i]}" "${VALUES[$i]}"
+                            printf " \\\\\n  %s %q" "${OPT_FLAG[$i]}" "${VALUES[$i]}"
                         else
-                            printf " \\\\\n  %s\n" "${OPT_FLAG[$i]}"
+                            printf " \\\\\n  %s" "${OPT_FLAG[$i]}"
                         fi
                     else
                         if [[ -n "${OPT_ARG[$i]}" && -n "${VALUES[$i]}" ]]; then
@@ -621,8 +778,9 @@ write_script() {
                     fi
                 fi
             done
+            printf " \\\\\n  \"\$1\"\n"
         else
-            printf "exec claude\n"
+            printf "exec claude \"\$1\"\n"
         fi
     } > "$input"
 
@@ -635,13 +793,6 @@ write_script() {
     local rc="${BLUE}│${RESET}"
     SEP=14
     CL=$'\033[2K'
-
-    local exec_cmd
-    if [[ "$input" == ./* || "$input" == /* ]]; then
-        exec_cmd="$input"
-    else
-        exec_cmd="./$input"
-    fi
 
     printf "\n"
     printf "${BLUE}╭%s┯%s${RESET}\n" "${_HEAVY_DASHES:0:$((SEP - 1))}" "${_HEAVY_DASHES:0:$((w - SEP - 1))}"
@@ -729,6 +880,10 @@ _partial_redraw() {
 }
 
 # ── Main loop ───────────────────────────────────────────────────────────────
+if [[ -n "$SCRIPT_TO_LOAD" ]]; then
+    load_script_state "$SCRIPT_TO_LOAD"
+fi
+
 draw_all
 
 while true; do
